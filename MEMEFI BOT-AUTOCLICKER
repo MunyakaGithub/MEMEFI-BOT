@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Memefi Bot [SmartBot] Enhanced
 // @namespace    https://smartbot.black/
-// @version      1.8.0
+// @version      1.8.2
 // @description  Bot for playing Memefi on Telegram with UI and advanced features including Turbo Boost, AutoSpin, and game pause/resume
 // @author       Smartbot Team
 // @match        https://tg-app.memefi.club/*
@@ -13,19 +13,27 @@
     let isRun = false;
     let isGamePaused = false;
     let settings = {
-        minClickDelay: 1e-6, // Minimum delay between clicks in seconds
-        maxClickDelay: 5e-6, // Maximum delay between clicks in seconds
-        autoSpin: true, // Enable auto spinning
-        autoTurbo: true, // Enable turbo tap mode
-        energyThreshold: 20 // Minimum energy threshold to trigger the bot
+        minClickDelay: 0,
+        maxClickDelay: 1,
+        autoSpin: false,
+        autoTurbo: false,
+        energyThreshold: 10
     };
 
-    const LAST_RUN_CLAIM = "lastRunClaim";
-    const logPrefix = '[SmartBot]';
-    const styles = {
-        success: 'color: green; font-weight: bold;',
-        error: 'color: red; font-weight: bold;'
-    };
+    const SETTINGS_KEY = 'MemefiBotSettings'; // Storage key for settings
+
+    function saveSettings() {
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        console.log('Settings saved:', settings);
+    }
+
+    function loadSettings() {
+        const savedSettings = localStorage.getItem(SETTINGS_KEY);
+        if (savedSettings) {
+            settings = JSON.parse(savedSettings);
+            console.log('Settings loaded:', settings);
+        }
+    }
 
     function getRandomInt(min, max) {
         return Math.floor(Math.random() * (max - min + 1)) + min;
@@ -39,128 +47,145 @@
         );
     }
 
-    function getMaxEnergy() {
-        return (
-            (document.querySelector('g[clip-path="url(#clip0_21455_16555)"]')
-                ?.parentElement?.nextSibling?.querySelector("span:nth-child(2)")
-                ?.innerText?.replace(",", "")
-                ?.replace("/", "") ?? 0) * 1
-        );
-    }
-
-    function createTouch(target, x, y) {
-        return new Touch({
-            identifier: Date.now(),
-            target: target,
-            clientX: x,
-            clientY: y,
-            radiusX: 2.5,
-            radiusY: 2.5,
-            rotationAngle: 0,
-            force: 0.5,
-        });
-    }
-
     function clickAtRandomIntervals(minX, maxX, minY, maxY) {
         function clickRandom() {
             if (isGamePaused) return;
-
             const x = getRandomInt(minX, maxX);
             const y = getRandomInt(minY, maxY);
-
-            const pointerEventInit = {
-                pointerId: 1,
-                bubbles: true,
-                cancelable: true,
-                composed: true,
-                view: window,
-                detail: 1,
-                screenX: x,
-                screenY: y,
-                clientX: x,
-                clientY: y,
-                pointerType: "touch",
-                width: 1,
-                height: 1,
-                pressure: 0.5,
-                isPrimary: true,
-            };
-
             const element = document.elementFromPoint(x, y);
-
             if (element) {
-                const pointerDownEvent = new PointerEvent("pointerdown", pointerEventInit);
+                const pointerDownEvent = new PointerEvent("pointerdown", {
+                    pointerId: 1,
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: x,
+                    clientY: y,
+                    pointerType: "touch"
+                });
                 element.dispatchEvent(pointerDownEvent);
-                console.log(`Pointer down at (${x}, ${y}) on element:`, element);
             }
-
-            const delay = getRandomInt(settings.minClickDelay * 1e9, settings.maxClickDelay * 1e9);
+            const delay = getRandomInt(settings.minClickDelay, settings.maxClickDelay);
             setTimeout(clickRandom, delay);
         }
 
-        clickRandom();
+        // Use requestAnimationFrame to try to avoid throttling in background tabs
+        function runClickLoop() {
+            if (!document.hidden && isRun) {
+                clickRandom();
+            }
+            requestAnimationFrame(runClickLoop);
+        }
+
+        runClickLoop();
     }
 
     function toggleUIVisibility(hide) {
         const uiElement = document.getElementById("memefi-bot-ui");
+        const minimizeButton = document.getElementById("minimizedButton");
+
         if (hide) {
+            // Hide the main UI
             uiElement.style.display = "none";
-            localStorage.setItem("uiVisible", "false");
+
+            // Make the minimized button visible and move it to a specific location (e.g., bottom-right)
+            minimizeButton.style.display = "block";
+            minimizeButton.style.position = "fixed";
+            minimizeButton.style.bottom = "10px";  // Place at the bottom
+            minimizeButton.style.right = "10px";   // Place on the right
         } else {
+            // Show the main UI and hide the minimized button
             uiElement.style.display = "block";
-            localStorage.setItem("uiVisible", "true");
+            minimizeButton.style.display = "none";
         }
     }
 
     function startBot() {
-        if (isGamePaused) return;
-
         if (getEnergy() < settings.energyThreshold) {
             alert("Not enough energy to start the bot!");
             return;
         }
 
         isRun = true;
-        toggleUIVisibility(true); // Minimize UI
+        toggleUIVisibility(true);
         const bodyRect = document.body.getBoundingClientRect();
         clickAtRandomIntervals(0, bodyRect.width, 0, bodyRect.height);
-    }
-
-    function checkAndClickTurboBoost() {
-        const turboBoostElement = document.querySelector('img[src="/_MOCKED_ICONS_/turbo-boost.svg"]');
-
-        if (turboBoostElement) {
-            turboBoostElement.click();
-            console.log(`${logPrefix} Turbo Boost clicked!`, styles.success);
-            setTimeout(() => {
-                const specialElement = document.querySelector('div.sc-braxZu.gmKjLQ');
-                if (specialElement && specialElement.style.display === 'block') {
-                    console.log(`${logPrefix} Special element detected. Starting fast auto-clicker...`, styles.success);
-                    settings.minClickDelay = 10e-6; // Set faster click delay
-                    clickAtRandomIntervals(0, document.body.scrollWidth, 0, document.body.scrollHeight);
-                }
-            }, 1000);
+        if (settings.autoSpin) {
+            clickButton();
         }
-
-        setTimeout(checkAndClickTurboBoost, 2000);
     }
 
     function toggleAutoTurbo() {
         settings.autoTurbo = !settings.autoTurbo;
-        autoTurboButton.textContent = settings.autoTurbo ? 'Auto Use Turbo: On' : 'Auto Use Turbo: Off';
-        autoTurboButton.style.backgroundColor = settings.autoTurbo ? '#98c379' : '#e06c75';
+        document.getElementById('autoTurboButton').textContent = settings.autoTurbo ? 'Auto Use Turbo: On' : 'Auto Use Turbo: Off';
+        saveSettings();
+        if (settings.autoTurbo) {
+            startAutoTurbo();
+        }
     }
 
     function toggleAutoSpin() {
         settings.autoSpin = !settings.autoSpin;
-        autoSpinButton.textContent = settings.autoSpin ? 'AutoSpin: On' : 'AutoSpin: Off';
-        autoSpinButton.style.backgroundColor = settings.autoSpin ? '#98c379' : '#e06c75';
+        document.getElementById('autoSpinButton').textContent = settings.autoSpin ? 'AutoSpin: On' : 'AutoSpin: Off';
+        saveSettings();
+
+        if (settings.autoSpin) {
+            clickButton(); // Start auto spinning
+            setTimeout(() => {
+                // After a delay, return to normal tapping
+                clickAtRandomIntervals(0, document.body.clientWidth, 0, document.body.clientHeight);
+            }, 5000); // Adjust this delay as needed
+        }
     }
 
     function toggleGamePause() {
         isGamePaused = !isGamePaused;
-        pauseResumeButton.textContent = isGamePaused ? 'Resume' : 'Pause';
-        pauseResumeButton.style.backgroundColor = isGamePaused ? '#e5c07b' : '#98c379';
+        document.getElementById('pauseResumeButton').textContent = isGamePaused ? 'Resume' : 'Pause';
+        saveSettings();
+    }
+
+    function clickButton() {
+        if (!settings.autoSpin) return;
+
+        const button = document.querySelector('.css-58bkmv');
+        if (button) {
+            ['touchstart', 'touchend'].forEach(eventType =>
+                button.dispatchEvent(new TouchEvent(eventType, { bubbles: true, cancelable: true, touches: [new Touch({ identifier: 1, target: button })] }))
+            );
+            button.click();
+        }
+        setTimeout(clickButton, Math.random() * 2500 + 2500);
+    }
+
+    function startAutoTurbo() {
+        if (!settings.autoTurbo) return;
+
+        const openBoosterButton = document.querySelector('button.css-wfy1cz');
+        if (openBoosterButton) {
+            openBoosterButton.click(); // Open the booster interface
+
+            setTimeout(() => {
+                const boosterCountElement = document.querySelector('.MuiTypography-bodyLittleBold.css-1yf75a9');
+                if (boosterCountElement) {
+                    const boosterCount = parseInt(boosterCountElement.textContent.split('/')[0].trim());
+                    if (boosterCount > 0) {
+                        const activateButton = document.querySelector('.MuiButton-primarySizeLarge.css-q3yh8u');
+                        if (activateButton) {
+                            activateButton.click(); // Activate the booster
+                            console.log('Turbo activated.');
+                            // Return to normal tapping after a delay
+                            setTimeout(() => {
+                                clickAtRandomIntervals(0, document.body.clientWidth, 0, document.body.clientHeight);
+                            }, 5000); // Adjust this delay as needed
+                        }
+                    } else {
+                        console.log('No available boosters. Auto Turbo disabled.');
+                        settings.autoTurbo = false;
+                        saveSettings();
+                    }
+                }
+            }, 1500);
+        }
     }
 
     function createSettingElement(label, id, type, min, max, step, tooltip) {
@@ -177,17 +202,18 @@
         inputElem.min = min;
         inputElem.max = max;
         inputElem.step = step;
-        inputElem.value = settings[id.replace('minClickDelay', 'minClickDelay').replace('maxClickDelay', 'maxClickDelay')];
+        inputElem.value = settings[id];
+        inputElem.addEventListener('change', (e) => {
+            settings[id] = e.target.value;
+            document.getElementById(`${id}Display`).textContent = e.target.value;
+            saveSettings();
+        });
         container.appendChild(inputElem);
 
         const displayElem = document.createElement('span');
         displayElem.id = `${id}Display`;
         displayElem.textContent = inputElem.value;
         container.appendChild(displayElem);
-
-        inputElem.oninput = () => {
-            displayElem.textContent = inputElem.value;
-        };
 
         const tooltipElem = document.createElement('div');
         tooltipElem.className = 'tooltip';
@@ -197,130 +223,91 @@
         return container;
     }
 
-    function updateSettingsMenu() {
-        document.getElementById('minClickDelay').value = settings.minClickDelay * 1e9;
-        document.getElementById('minClickDelayDisplay').textContent = settings.minClickDelay * 1e9;
-        document.getElementById('maxClickDelay').value = settings.maxClickDelay * 1e9;
-        document.getElementById('maxClickDelayDisplay').textContent = settings.maxClickDelay * 1e9;
-        autoTurboButton.textContent = settings.autoTurbo ? 'Auto Use Turbo: On' : 'Auto Use Turbo: Off';
-        autoTurboButton.style.backgroundColor = settings.autoTurbo ? '#98c379' : '#e06c75';
-        autoSpinButton.textContent = settings.autoSpin ? 'AutoSpin: On' : 'AutoSpin: Off';
-        autoSpinButton.style.backgroundColor = settings.autoSpin ? '#98c379' : '#e06c75';
-    }
-
     function createUI() {
         const ui = document.createElement("div");
         ui.id = "memefi-bot-ui";
         ui.style.position = "fixed";
-        ui.style.top = "10px";
-        ui.style.left = "10px";
+        ui.style.top = "5px";
+        ui.style.left = "5px";
+        ui.style.width = "300px";
+        ui.style.backgroundColor = "#2d2d2d";
+        ui.style.color = "#ffffff";
+        ui.style.border = "2px solid #ff5722";
         ui.style.padding = "10px";
-        ui.style.backgroundColor = "#2d2d2d"; // Dark background for better visibility
-        ui.style.color = "#ffffff"; // White text
-        ui.style.border = "2px solid #ff5722"; // Bright orange border
         ui.style.zIndex = "99999";
-        ui.style.borderRadius = "10px"; // Rounded corners
-        ui.style.boxShadow = "0 0 10px rgba(0,0,0,0.5)"; // Shadow for depth
-        ui.style.cursor = "move";
+        ui.style.cursor = "move"; // Add move cursor style
 
-        ui.innerHTML = `
-            <h3>Memefi Bot Settings</h3>
-            <button id="minimizeUI" style="background-color: #ff5722; color: #ffffff; border: none; border-radius: 5px; padding: 5px 10px;">🗕</button>
-            <div id="settingsContent">
-                ${createSettingElement('Min Click Delay (ns):', 'minClickDelay', 'number', 0, 1e12, 1, 'Minimum delay between clicks in nanoseconds.').outerHTML}
-                <br>
-                ${createSettingElement('Max Click Delay (ns):', 'maxClickDelay', 'number', 0, 1e12, 1, 'Maximum delay between clicks in nanoseconds.').outerHTML}
-                <br>
-                ${createSettingElement('Energy Threshold:', 'energyThreshold', 'number', 0, 1000, 1, 'Energy threshold below which the bot will not start.').outerHTML}
-                <br>
-                <button id="saveSettings" style="background-color: #4caf50; color: #ffffff; border: none; border-radius: 5px; padding: 5px 10px;">Save Settings</button>
-                <button id="startBot" style="background-color: #2196f3; color: #ffffff; border: none; border-radius: 5px; padding: 5px 10px;">Start Bot</button>
-                <button id="hideUI" style="background-color: #f44336; color: #ffffff; border: none; border-radius: 5px; padding: 5px 10px;">Hide UI</button>
-            </div>
-        `;
+        // Make the UI draggable
+        let isDragging = false;
+        let offsetX, offsetY;
+        ui.addEventListener('mousedown', function (e) {
+            isDragging = true;
+            offsetX = e.clientX - ui.getBoundingClientRect().left;
+            offsetY = e.clientY - ui.getBoundingClientRect().top;
+            document.body.style.userSelect = 'none'; // Prevent text selection while dragging
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (isDragging) {
+                ui.style.left = `${e.clientX - offsetX}px`;
+                ui.style.top = `${e.clientY - offsetY}px`;
+            }
+        });
+
+        document.addEventListener('mouseup', function () {
+            isDragging = false;
+            document.body.style.userSelect = ''; // Restore text selection
+        });
+
+        // Buttons for auto spin and turbo
+        const autoSpinButton = document.createElement("button");
+        autoSpinButton.id = "autoSpinButton";
+        autoSpinButton.textContent = settings.autoSpin ? 'AutoSpin: On' : 'AutoSpin: Off';
+        autoSpinButton.onclick = toggleAutoSpin;
+        ui.appendChild(autoSpinButton);
+
+        const autoTurboButton = document.createElement("button");
+        autoTurboButton.id = "autoTurboButton";
+        autoTurboButton.textContent = settings.autoTurbo ? 'Auto Use Turbo: On' : 'Auto Use Turbo: Off';
+        autoTurboButton.onclick = toggleAutoTurbo;
+        ui.appendChild(autoTurboButton);
+
+        const pauseResumeButton = document.createElement('button');
+        pauseResumeButton.id = 'pauseResumeButton';
+        pauseResumeButton.textContent = isGamePaused ? 'Resume' : 'Pause';
+        pauseResumeButton.onclick = toggleGamePause;
+        ui.appendChild(pauseResumeButton);
+
+        const startBotButton = document.createElement("button");
+        startBotButton.textContent = "Start Bot";
+        startBotButton.onclick = startBot;
+        ui.appendChild(startBotButton);
+
+        // Settings
+        ui.appendChild(createSettingElement("Min Click Delay (ms):", "minClickDelay", "range", 0, 5000, 50, "Minimum delay between clicks"));
+        ui.appendChild(createSettingElement("Max Click Delay (ms):", "maxClickDelay", "range", 0, 5000, 50, "Maximum delay between clicks"));
+        ui.appendChild(createSettingElement("Energy Threshold:", "energyThreshold", "number", 1, 100, 1, "Minimum energy to start the bot"));
+
+        // Add the hide button
+        const hideButton = document.createElement("button");
+        hideButton.textContent = "Hide UI";
+        hideButton.onclick = () => toggleUIVisibility(true);
+        ui.appendChild(hideButton);
 
         document.body.appendChild(ui);
 
-        const minimizeButton = document.getElementById("minimizeUI");
-        const settingsContent = document.getElementById("settingsContent");
-        const hideUIButton = document.getElementById("hideUI");
-        const showUIButton = document.createElement("button");
-        showUIButton.id = "showUI";
-        showUIButton.textContent = "Show UI";
-        showUIButton.style.position = "fixed";
-        showUIButton.style.bottom = "10px";
-        showUIButton.style.left = "10px";
-        showUIButton.style.backgroundColor = "#4caf50"; // Green background
-        showUIButton.style.color = "#ffffff"; // White text
-        showUIButton.style.border = "none";
-        showUIButton.style.borderRadius = "5px";
-        showUIButton.style.padding = "5px 10px";
-        showUIButton.style.zIndex = "99999";
-
-        document.body.appendChild(showUIButton);
-
-        minimizeButton.onclick = () => {
-            if (settingsContent.style.display === "none") {
-                settingsContent.style.display = "block";
-                minimizeButton.textContent = "🗕";
-            } else {
-                settingsContent.style.display = "none";
-                minimizeButton.textContent = "🗗";
-            }
-        };
-
-        hideUIButton.onclick = () => {
-            toggleUIVisibility(true); // Hide UI
-        };
-
-        showUIButton.onclick = () => {
-            toggleUIVisibility(false); // Show UI
-        };
-
-        document.getElementById("saveSettings").onclick = () => {
-            settings.minClickDelay = parseInt(document.getElementById("minClickDelay").value, 10) / 1e9;
-            settings.maxClickDelay = parseInt(document.getElementById("maxClickDelay").value, 10) / 1e9;
-            settings.energyThreshold = parseInt(document.getElementById("energyThreshold").value, 10);
-            updateSettingsMenu();
-            alert("Settings saved!");
-        };
-
-        document.getElementById("startBot").onclick = startBot;
-
-        // Initialize the UI visibility based on user preference
-        if (localStorage.getItem("uiVisible") === "false") {
-            toggleUIVisibility(true); // Initially hide UI
-        } else {
-            toggleUIVisibility(false); // Show UI initially
-        }
+        // Minimized button
+        const minimizedButton = document.createElement("button");
+        minimizedButton.id = "minimizedButton";
+        minimizedButton.textContent = "Show UI";
+        minimizedButton.style.display = "none"; // Initially hidden
+        minimizedButton.onclick = () => toggleUIVisibility(false);
+        document.body.appendChild(minimizedButton);
     }
 
-    createUI();
-
-    // Initialize other functionalities
-    if (settings.autoTurbo) {
-        checkAndClickTurboBoost();
-    }
-
-    // Enable draggable UI
-    const ui = document.getElementById("memefi-bot-ui");
-    ui.onmousedown = (e) => {
-        e.preventDefault();
-
-        const offsetX = e.clientX - ui.getBoundingClientRect().left;
-        const offsetY = e.clientY - ui.getBoundingClientRect().top;
-
-        const onMouseMove = (event) => {
-            ui.style.left = `${event.clientX - offsetX}px`;
-            ui.style.top = `${event.clientY - offsetY}px`;
-        };
-
-        const onMouseUp = () => {
-            document.removeEventListener("mousemove", onMouseMove);
-            document.removeEventListener("mouseup", onMouseUp);
-        };
-
-        document.addEventListener("mousemove", onMouseMove);
-        document.addEventListener("mouseup", onMouseUp);
+    // Load settings and create UI on page load
+    window.onload = () => {
+        loadSettings();
+        createUI();
     };
 })();
